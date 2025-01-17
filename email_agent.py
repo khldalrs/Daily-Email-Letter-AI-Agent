@@ -1,9 +1,10 @@
 import os
-import requests
+import json
 from datetime import datetime, timedelta
 from supabase import create_client
 from dotenv import load_dotenv
 import google.generativeai as genai
+from mailjet_rest import Client
 
 # Load environment variables
 load_dotenv()
@@ -16,6 +17,9 @@ supabase = create_client(
     os.getenv('SUPABASE_URL'),
     os.getenv('SUPABASE_KEY')
 )
+
+# Initialize Mailjet with v3.1
+mailjet = Client(auth=(os.getenv('MJ_APIKEY_PUBLIC'), os.getenv('MJ_APIKEY_PRIVATE')), version='v3.1')
 
 def fetch_latest_data():
     """
@@ -43,7 +47,7 @@ def fetch_latest_data():
     
     except Exception as e:
         print(f"Error fetching data: {e}")
-        print(f"Full error details: {str(e)}")  # Added for better debugging
+        print(f"Full error details: {str(e)}")
         return None
 
 def generate_email_content(data):
@@ -51,16 +55,33 @@ def generate_email_content(data):
     Generate email content using Gemini
     """
     try:
-        prompt = """You are a professional financial analyst writing a brief email update.
-        Based on the provided BTC price data and market analysis, create a very concise but insightful email.
+        prompt = """You are a direct and data-driven financial analyst. Create a concise but well-structured market update.
+
+        Analyze the provided BTC price data and market news to create a brief narrative that covers:
+        1. Price Movement
+           - Current price and significant changes
+           - Key technical levels if relevant
         
-        Focus on:
-        1. Key price movements and their significance
-        2. Important market correlations
-        3. Notable trends or patterns
+        2. Market Context
+           - Most impactful recent events
+           - Notable institutional activity
         
-        Keep the analysis professional but brief (max 4-5 sentences).
-        Format it as a proper email with a subject line.
+        3. Forward Look
+           - Key levels to watch
+           - Potential catalysts ahead
+        
+        Rules:
+        - Write in clear, flowing paragraphs
+        - No generic commentary or filler phrases
+        - Only include significant information
+        - Skip any section if nothing noteworthy
+        - Maximum 3 short paragraphs
+        - No greetings or sign-offs
+        
+        Format:
+        - Subject line: One clear insight about current state
+        - 2-3 concise paragraphs
+        - Optional bullet points for key levels
         
         Context:
         {data}
@@ -89,25 +110,45 @@ def generate_email_content(data):
 
 def send_email(subject, body, recipient="khldalrs@gmail.com"):
     """
-    Send email using Mailgun API
+    Send email using Mailjet API v3.1
     """
     try:
-        response = requests.post(
-            "https://api.mailgun.net/v3/sandbox0645c47f3ba7bda99c274ad1780fbbb1.mailgun.org/messages",
-            auth=("api", os.getenv("MAILGUN_API_KEY")),
-            data={
-                "from": "Finance Bot <mailgun@sandbox0645c47f3ba7bda99c274ad1780fbbb1.mailgun.org>",
-                "to": recipient,
-                "subject": subject,
-                "text": body
-            }
-        )
+        html_body = body.replace('\n', '<br>')
         
-        response.raise_for_status()
-        return True
+        data = {
+            'Messages': [
+                {
+                    "From": {
+                        "Email": "khldalrs@gmail.com",
+                        "Name": "Finance Bot"
+                    },
+                    "To": [
+                        {
+                            "Email": recipient,
+                            "Name": "Khalid"
+                        }
+                    ],
+                    "Subject": subject,
+                    "TextPart": body,
+                    "HTMLPart": f"<h3>Financial Market Update</h3><br>{html_body}"
+                }
+            ]
+        }
+        
+        result = mailjet.send.create(data=data)
+        
+        if result.status_code == 200:
+            print("Email sent successfully!")
+            print(f"Response: {result.json()}")
+            return True
+        else:
+            print(f"Failed to send email. Status code: {result.status_code}")
+            print(f"Response: {result.json()}")
+            return False
         
     except Exception as e:
         print(f"Error sending email: {e}")
+        print(f"Attempted to send with data: {json.dumps(data, indent=2)}")
         return False
 
 def main():
